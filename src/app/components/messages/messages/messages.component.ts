@@ -3,12 +3,15 @@ import { DocumentSnapshot, QueryDocumentSnapshot} from '@angular/fire/firestore'
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { MatDialog} from '@angular/material/dialog';
 import { Observable, of, Subject, Subscription } from 'rxjs';
-import { map, startWith, tap, timestamp } from 'rxjs/operators';
+import { delay, filter, map, startWith, take, tap, timestamp } from 'rxjs/operators';
 import { FireAuthService } from 'src/app/services/fire-auth.service';
 import { MessagingService } from 'src/app/services/messaging.service';
 import {MatChipInputEvent} from '@angular/material/chips';
 import { MatAutocomplete, MatAutocompleteSelectedEvent } from '@angular/material/autocomplete';
 import {COMMA, ENTER} from '@angular/cdk/keycodes';
+import { Store } from '@ngrx/store';
+import { GetData, SetSelectedConversationId } from 'src/app/state/message.actions';
+import { GetLoadingState, GetSelectedConversationId } from 'src/app/state/message.selectors';
 export interface Message{
   sender: string;
   createdAt;
@@ -23,7 +26,8 @@ export interface Message{
 export class MessagesComponent implements OnInit, OnDestroy {
   separatorKeysCodes: number[] = [ENTER, COMMA];
 
-  chatroomList$: Observable<any> = new Observable();
+  chatroomList$: Observable<any>;/// = new Observable();
+
   chatroomSubject: Subject<any> = new Subject<any>();
 
   filteredUsernames$: Observable<any>;
@@ -40,31 +44,49 @@ export class MessagesComponent implements OnInit, OnDestroy {
   
   })
 
+  public conversationId$: Observable<string>;
+  public showSpinner: boolean = false;
+
   constructor(
     private msg: MessagingService,
     private fa: FireAuthService,
     public dialog: MatDialog,
-   ) 
-    {
+    public store: Store,
+   ) {}
 
-    }
+  setSelectedId() {
+    this.store.dispatch(GetData());
+    this.showSpinner = true;
+    this.store.select(GetLoadingState).pipe(
+      delay(1000),
+      filter((loadingState) => loadingState === 1),
+      take(1),
+      tap(() => this.showSpinner = false)
+    ).subscribe();
+  }
+
 
   ngOnInit(): void {
+    this.conversationId$ = this.store.select(GetSelectedConversationId).pipe(
+      tap((id)=>{
+        console.log('id',id)
+      })
+    )
+
     this.chatroomSubject.subscribe({
       next: (value) => this.chatroomList$ = value
     })
-    this.updateChatrooms();
     this.msg.queryAllUsernames().subscribe();
 
-    this.filteredUsernames$ = this.searchForm.get('searchUsers').valueChanges.pipe(
+    this.filteredUsernames$ = this.searchForm.get('searchUsers')
+      .valueChanges.pipe(
       startWith(null),
-      map((username: string | null) => username ? this.msg.filterAllUsernames(username) : this.msg.getAllUsernames().slice() )
+      map((username: string | null) => username ? 
+        this.msg.filterAllUsernames(username) : 
+        this.msg.getAllUsernames().slice() 
+      )
     )
     this.newChatMembers$ = this.msg.getNewChatroomMembers()
-  }
-
-  updateChatrooms(){
-    this.chatroomSubject.next(this.msg.queryChatroomsOnce())
   }
 
   ngOnDestroy(){
@@ -95,7 +117,6 @@ export class MessagesComponent implements OnInit, OnDestroy {
   }
 
   selected(event: MatAutocompleteSelectedEvent) {
-    console.log(event.option)
     this.msg.addNewChatMember(event.option.viewValue)
     this.userInput.nativeElement.value = '';
     this.searchForm.get('searchUsers').setValue('');
